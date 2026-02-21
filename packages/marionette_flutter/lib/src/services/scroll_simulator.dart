@@ -17,22 +17,51 @@ class ScrollSimulator {
 
   /// Scrolls until the widget matching [matcher] is visible.
   ///
-  /// Finds the first [Scrollable] in the tree and scrolls it until the target
-  /// widget becomes visible or [_maxScrolls] attempts are exhausted.
+  /// Uses two strategies:
+  /// 1. If the target is already in the widget tree (e.g., inside a
+  ///    [SingleChildScrollView] which builds all children), uses
+  ///    [Scrollable.ensureVisible] for reliable, direct scrolling.
+  /// 2. If the target is not yet built (e.g., in a [ListView] with lazy
+  ///    building), falls back to simulated drag gestures on the first
+  ///    [Scrollable] in the tree.
   ///
   /// Throws an [Exception] if:
-  /// - The target widget is not found
   /// - No [Scrollable] widget is found in the tree
   /// - The target widget is not visible after [_maxScrolls] scroll attempts
   Future<void> scrollUntilVisible(
     WidgetMatcher matcher,
     MarionetteConfiguration configuration,
   ) async {
-    // Find the first Scrollable in the tree
+    // Strategy 1: If the target is already in the tree, use ensureVisible.
+    // This is the most reliable approach and works correctly with nested
+    // scroll views (e.g., sidebar + main content area).
+    final target = _widgetFinder.findElement(matcher, configuration);
+
+    if (target != null) {
+      final renderObject = target.renderObject;
+      if (renderObject != null) {
+        await Scrollable.ensureVisible(
+          target,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+        // Wait for the scroll animation to complete and frame to settle
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+
+        // Verify the target is now hittable
+        if (_isHittable(target)) {
+          return;
+        }
+      }
+    }
+
+    // Strategy 2: Fall back to drag-based scrolling.
+    // Needed for ListView/GridView where off-screen children aren't built.
     final scrollable = _widgetFinder.findElement(
       const TypeMatcher(Scrollable),
       configuration,
     );
+
     if (scrollable == null) {
       throw Exception('No Scrollable widget found in the tree');
     }
